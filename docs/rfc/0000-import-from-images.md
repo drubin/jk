@@ -2,21 +2,22 @@
 
 ## Summary
 
-This RFC proposes
+The PR [#305][] adds a flag to `jk run` etc. which is used to add
+directories to the "module search path"; that is, the directories in
+which modules are sought when imported.
 
- - using a search path, rather than only looking in the script
-   directory, for resolving modules (as requested in [#243][])
- - adding a flag for specifying a local path to put on the module
+This RFC conjectures that container images are a useful form of
+packaging (for discussion, see the rest of the text), and proposes:
+
+ - adding a flag for specifying a container image to put on the module
    search path
- - adding a flag for specifying a container image to put on the search
-   path
  - automatically downloading and caching images that appear on the
-   search path
+   module search path
 
 The main implementation changes are:
 
- - allowing for an arbitrary set of module resolvers to be given to
-   the VM
+ - allowing module resolvers to access container images (possibly by
+   unpacking them, at least to start with)
  - an image download and caching mechanism
 
 The latter is orthogonal to its use for fetching modules, though this
@@ -25,13 +26,13 @@ is the only use for it so far.
 ## Example
 
 ```sh
-$ jk validate -I ~/jklib --lib jkcfg/kubernetes:0.2.1 ./lint.js *.yaml
+$ jk validate --lib jkcfg/kubernetes:0.2.1 ./lint.js *.yaml
 ```
 
-This adds `$HOME/jklib` and the filesystem in the image
-`jkcfg/kubernetes:0.2.1` to the module search path, then runs the
-validation function from `./lint.js` (which is assumed to import
-modules from both locations) over the files given by the glob pattern.
+This adds the filesystem in the image `jkcfg/kubernetes:0.2.1` to the
+module search path, then runs the validation function from `./lint.js`
+(which is for the sake of the example, assumed to import modules from
+the image) over the files given by the glob pattern.
 
 `jk` will check if the image is already cached locally, and if not,
 download it before running.
@@ -56,25 +57,24 @@ almost always need some libraries to be there as well.
 There are a few ways to arrange this:
 
  - vendor the libraries (i.e., add them all to the git repo)
- - arrange for NPM to be present in the Flux container, and run it
-   before running the script
- - no doubt variations on the above
+ - bake NPM into the Flux container, and run it before running the
+   script
+ - copy files from an initContainer into a volume in the module search
+   path
+ - create a custom image that includes all of fluxd, jk, and the
+   libraries
+ - ... and no doubt, more variations on the above
 
-But what is _not_ possible is to copy the files over from an
-initContainer, or similar, because there's nowhere to put them that
-module resolution will find them. Hence: let `jk` be given a module
-search path.
+All require some work outside of the code and invocation of `jk`
+itself, and none are elegant or convenient.
 
-Going a step further, it would be convenient to package modules in
-container images for distribution, using the same machinery as already
-use in place for containers.
+The RFC proposes a way to make fetching dependencies convenient,
+without sacrificing repeatability.
 
 _Explain here the motivation for the change -- what problem are people
 facing that is difficult to solve with `jk` as it is?_
 
 ## Design
-
-### Module search path
 
 ### User interface
 
@@ -187,7 +187,7 @@ It's also possible to make platform-specific images (that share
 layers) to save people fetching redundant files.
 
 However, there's no dependency resolution machinery, and it may be
-difficult to co-opt that of NPM (if it were considered suitable).
+fiddly to co-opt that of NPM (if it were considered suitable).
 
 So it comes down to: are the possibilities of using images
 sufficiently interesting to try using them in the way detailed here,
@@ -249,3 +249,5 @@ repeatable. Or a digest given in the image name (but then .. so much
 text .. maybe getting the search path from a file would be useful).
 
 [#243]: https://github.com/jkcfg/jk/issues/243
+[#305]: https://github.com/jkcfg/jk/pull/305
+[flux-manifest]: https://docs.fluxcd.io/en/stable/references/fluxyaml-config-files.html
