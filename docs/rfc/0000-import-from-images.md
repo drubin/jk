@@ -1,4 +1,4 @@
-# Using container images for packaging
+# Using container images for packaging (experimental)
 
 ## Summary
 
@@ -51,40 +51,27 @@ distribution. (See Alternatives for some more discussion of NPM).
 The main kind of use case this addresses is how to arrange for
 dependencies to be available along with code. For example, when using
 `jk` with [Flux's manifest generation][flux-manifest], it's not enough
-for the generation script to be present in the git repo -- it will
-almost always need some libraries to be there as well.
+for a generation script to be present in the git repository, since it
+will almost always need some libraries to be there as well.
 
 There are a few ways to arrange this:
 
- - vendor the libraries (i.e., add them all to the git repo)
+ - vendor the libraries (i.e., add them all to the git repository)
  - bake NPM into the Flux container, and run it before running the
    script
  - copy files from an initContainer into a volume in the module search
    path
- - create a custom image that includes all of fluxd, jk, and the
-   libraries
- - ... and no doubt, more variations on the above
+ - create a custom image that includes fluxd, jk, and the libraries
+ - ... and no doubt, variations on the above
 
 All require some work outside of the code and invocation of `jk`
-itself, and none are elegant or convenient.
+itself, and none recommend themselves as elegant or convenient.
 
 The RFC proposes a way to make fetching dependencies convenient,
-without sacrificing repeatability.
-
-_Explain here the motivation for the change -- what problem are people
-facing that is difficult to solve with `jk` as it is?_
+without sacrificing repeatability, and introduces a low-stakes way to
+explore using container images for packaging.
 
 ## Design
-
-### User interface
-
-    jk run --lib jkcfg/kubernetes:0.2.1 -I ../mycharts generate.js
-
-The flag `-I` is chosen to be analogous to that used by C (and other?)
-compilers. Using the same flag for images would allow ambiguities, so
-it's better to have a spearate flag; `--lib` is put forward here as
-small and guessable. (`--image` is an alternative, but that doesn't
-indicate it's a _library_ rather than the thing to execute.)
 
 _Describe here the design of the change._
 
@@ -92,11 +79,44 @@ _Describe here the design of the change._
  - _How will it work, technically?_
  _ _What are the corner cases, and how are they covered?_
 
-### Downloading, caching, unpacking images
+### User interface
 
-https://github.com/opencontainers/image-tools has code for unpacking
-an image. https://github.com/containers/skopeo has code for fetching
-and converting between image formats.
+    jk run --lib jkcfg/kubernetes:0.2.1 -I ../mycharts generate.js
+
+`--lib` is put forward here as small and guessable. `--image` is an
+alternative, but that doesn't indicate it's a _library_ rather than
+the thing to execute.
+
+### Downloading and caching images
+
+When a library image is required for excuting a `jk` script, these
+things shall happen:
+
+ 1. The image ref is resolved to a path within the cache directory
+ 
+    1.2. whether the ref is a tag or a digest, the path is expected to
+         be a symlink to a blob which is the manifest. Note that the
+         digest ref for an image is not the digest of the manifest
+         blob (I don't know what it is, maybe the digest of the
+         gzipped file?)
+
+ 2. If the file does not exist, it is resolved using OCI distribution,
+    and written into the cache (as per the expectations in the
+    previous step)
+
+ 3. The file at the path, or linked, is a manifest (MIME type
+    application/vnd.oci.image.manifest.v1+json); if necessary, it's
+    converted to that from a Docker image manifest
+
+    3.1. If the fetched file is a manifest list, the appropriate
+         manifest from it is fetched in turn.
+
+ 4. For each layer in the image (we don't care about the config,
+    that's for running the image), if it is missing then fetch it,
+    verify its digest, and put it in the cache blob store
+
+ 5. A filesystem based on the image layers is added to the module
+    search path.
 
 ### Layout of images
 
@@ -105,9 +125,20 @@ for modules?
 
  * will want image layers to compose so they can be remoxed, so it
    makes sense to put modules in the same place every time
- * e.g., just chuck everything under `/node_modules`, that way if you
-   jam a bunch of layers together in an image, it'll just look like an
-   NPM directory
+ * e.g., just chuck everything under `/jk`, so if you jam a bunch of
+   layers together in an image, it'll just look like a directory with
+   all the libraries under `/jk`.
+
+### Using images in the module search path
+
+In two steps:
+
+ - adapt the module resolvers to allow filesystems represented by
+   http.FileSystem
+ - write a union filesystem that understands the diff layers of an OCI
+   image
+
+https://godoc.org/github.com/shurcooL/httpfs/union may help.
 
 #### Building images
 
